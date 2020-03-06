@@ -14,4 +14,4 @@ To initialize sqlite table
   
   db.sqlite3
   
-  room/migrations/\*
+  */migrations/\*
