@@ -32,6 +32,8 @@ ALLOWED_HOSTS = []
 
 INSTALLED_APPS = [
     'room.apps.RoomConfig',
+    'election.apps.ElectionConfig',
+    'group_management.apps.GroupManagementConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
