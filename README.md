@@ -43,7 +43,7 @@ b. follower - candidate - leader state:
 ### 2. Room:
 This module defines database related operation. After the group has a leader, database changes go through the leader. The leader first updates its own value in memory and then requests to update followers' values in memory. After all update requests to the followers return successfully, the leader commits and then requests to inform followers to commit.
 
-#### inner function:
+#### functions:
 a. update:
 * Update value in memory.
 * This function is related to url "update". Once a node's "update" url is hit, this function is executed.
