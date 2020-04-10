@@ -6,16 +6,25 @@ import sqlite3
 from sqlite3 import Error
 from threading import Timer
 import os
+import time
 
 class Node(rpyc.Service):
 
-    def __init__(self, argNodeIdx):
-        # todo group management instead of hard coded ip and ports
-        self.allNodesHost = ["localhost", "localhost", "localhost"]
-        self.allNodesPort = [5001, 5002, 5003]
-        self.numNodes = 3
-        self.nodeIdx = int(argNodeIdx)
-        print("Node", self.nodeIdx, "is running")
+    def __init__(self, argNodeIdx, argNodeHost, argNodePort):
+        self.middlewareHost = "localhost"
+        self.middlewarePort = 5000
+        self.curNodeHost = argNodeHost
+        self.curNodePort = argNodePort
+        self.curNodeIdx = int(argNodeIdx)
+
+        self.allNodesHost, self.allNodesPort = self.getAllMembers()
+        self.numNodes = len(self.allNodesHost)
+        print(self.allNodesHost)
+        print(self.allNodesPort)
+
+        self.joinGroup()
+        print(self.allNodesHost)
+        print(self.allNodesPort)
 
         # sqlite connection
         self.conn = None
@@ -63,7 +72,7 @@ class Node(rpyc.Service):
         1.1 Code related to scenario when follower state ends
     '''
     def BecomeCandidate(self):
-        print('follwer','node', self.nodeIdx, 'term', self.currentTerm)
+        print('follwer','node', self.curNodeIdx, 'term', self.currentTerm)
         print('follower','state', self.currentState)
         self.currentState = 'candidate'
         self.setupElection()
@@ -80,7 +89,7 @@ class Node(rpyc.Service):
         self.currentTerm += 1
         self.totalVotesCount = 0
         self.totalVotesCount += 1
-        self.votedFor = self.nodeIdx
+        self.votedFor = self.curNodeIdx
 
         if self.electionTimer != None:
             self.electionTimer.cancel()
@@ -88,10 +97,11 @@ class Node(rpyc.Service):
         if self.votesCheckTimer != None:
             self.votesCheckTimer.cancel()
             self.votesCheckTimer = None
-        for i in range(0, self.numNodes):
-            if i == self.nodeIdx:
+
+        for nodeIdx in self.allNodesHost:
+            if nodeIdx == self.curNodeIdx:
                 continue
-            args = (self.currentTerm, self.nodeIdx, self.allNodesHost[i], self.allNodesPort[i])
+            args = (self.currentTerm, self.curNodeIdx, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
             t = threading.Thread(target = self.startElection, args= args)
             t.start()
 
@@ -130,7 +140,7 @@ class Node(rpyc.Service):
         if self.votesCheckTimer != None:
             self.votesCheckTimer.cancel()
             self.votesCheckTimer = None
-        print('node', self.nodeIdx, 'term', self.currentTerm)
+        print('node', self.curNodeIdx, 'term', self.currentTerm)
         print('state', self.currentState)
         print(self.totalVotesCount)
         if self.totalVotesCount > self.numNodes/2:
@@ -138,7 +148,7 @@ class Node(rpyc.Service):
                 self.electionTimer.cancel()
                 self.electionTimer = None
             self.currentState = 'leader'
-            self.currentLeader = self.nodeIdx
+            self.currentLeader = self.curNodeIdx
             self.leaderAction()
     '''
         1.2 ends
@@ -151,10 +161,10 @@ class Node(rpyc.Service):
         if self.leaderTimer != None:
             self.leaderTimer.cancel()
             self.leaderTimer = None
-        for i in range(0, self.numNodes):
-            if i == self.nodeIdx:
+        for nodeIdx in self.allNodesHost:
+            if nodeIdx == self.curNodeIdx:
                 continue
-            args = (self.currentTerm, self.nodeIdx, self.allNodesHost[i], self.allNodesPort[i])
+            args = (self.currentTerm, self.curNodeIdx, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
             t = threading.Thread(target = self.sendHeartBeat, args= args)
             t.start()
         #todo group management: update nginx leader ip
@@ -192,9 +202,45 @@ class Node(rpyc.Service):
         1.3 ends
     '''
 
+    '''
+        1.4 Code related to group management
+    '''
+
+    def exposed_addMember(self, newMemIdx, newMemHost, newMemPort):
+        self.allNodesHost[newMemIdx] = newMemHost
+        self.allNodesPort[newMemIdx] = newMemPort
+        self.numNodes = len(self.allNodesHost)
+
+    '''
+    def exposed_removeMember(self, oldNodeHost, oldNodePort):
+        self.allNodesHost.remove(oldNodeHost)
+        self.allNodesPort.remove(oldNodePort)
+    '''
+
+    def joinGroup(self):
+        try:
+            conn = rpyc.connect(self.middlewareHost, self.middlewarePort)
+            conn.root.addNode(self.curNodeIdx, self.curNodeHost, self.curNodePort)
+        except Exception:
+            print("Node", self.curNodeIdx, "failed joining group")
+        self.allNodesHost[self.curNodeIdx] = self.curNodeHost
+        self.allNodesPort[self.curNodeIdx] = self.curNodePort
+        self.numNodes = len(self.allNodesHost)
+
+    def getAllMembers(self):
+        try:
+            conn = rpyc.connect(self.middlewareHost, self.middlewarePort)
+            return conn.root.getNodeList()
+        except Exception:
+            print("Middleware", portNum, "failed returning all members")
+
+    def exposed_is_leader(self):
+        return self.currentState == 'leader'
+
 if __name__ == '__main__':
     from rpyc.utils.server import ThreadPoolServer
-    nodeNum = sys.argv[1]
-    port = sys.argv[2]
-    server = ThreadPoolServer(Node(nodeNum), port = int(port))
+    nodeIdx = sys.argv[1]
+    host = sys.argv[2]
+    port = sys.argv[3]
+    server = ThreadPoolServer(Node(nodeIdx, host, port), port = int(port))
     server.start()
