@@ -19,12 +19,8 @@ class Node(rpyc.Service):
 
         self.allNodesHost, self.allNodesPort = self.getAllMembers()
         self.numNodes = len(self.allNodesHost)
-        print(self.allNodesHost)
-        print(self.allNodesPort)
 
         self.joinGroup()
-        print(self.allNodesHost)
-        print(self.allNodesPort)
 
         # sqlite connection
         self.conn = None
@@ -86,6 +82,8 @@ class Node(rpyc.Service):
     '''
 
     def setupElection(self):
+        print(self.allNodesHost)
+        print(self.allNodesPort)
         self.currentTerm += 1
         self.totalVotesCount = 0
         self.totalVotesCount += 1
@@ -249,7 +247,7 @@ class Node(rpyc.Service):
     def updateGroupLeader(self):
         try:
             conn = rpyc.connect(self.middlewareHost, self.middlewarePort)
-            return conn.root.setLeader(self.curNodeHost, self.curNodePort)
+            return conn.root.updateLeader(self.curNodeIdx, self.curNodeHost, self.curNodePort)
         except Exception:
             print("Middleware", self.middlewarePort, "failed setting leader")
 

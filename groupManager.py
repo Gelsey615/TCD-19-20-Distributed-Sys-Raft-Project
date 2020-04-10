@@ -10,6 +10,8 @@ class Middleware(rpyc.Service):
     def __init__(self):
         self.leaderHost = ""
         self.leaderPort = 0
+        self.leaderIdx = -1
+        self.checkLeaderTimer = None
         self.allNodesHost = {}
         self.allNodesPort = {}
 
@@ -18,9 +20,10 @@ class Middleware(rpyc.Service):
 
     def run_server(self):
         while True:
-            print(self.allNodesHost)
-            print(self.allNodesPort)
-            time.sleep(5);
+            if self.checkLeaderTimer == None:
+                self.checkLeaderTimer = Timer(1.1, self.checkLeader)
+                self.checkLeaderTimer.start()
+
     # add node
     def exposed_addNode(self, newNodeIdx, newNodeHost, newNodePort):
         self.allNodesHost[newNodeIdx] = newNodeHost
@@ -29,10 +32,10 @@ class Middleware(rpyc.Service):
             if nodeIdx == newNodeIdx:
                 continue
             args = (newNodeIdx, newNodeHost, newNodePort, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
-            t = threading.Thread(target = self.notifyAddMember, args= args)
+            t = threading.Thread(target = self.broadcastAddMember, args= args)
             t.start()
 
-    def notifyAddMember(self, newNodeIdx, newNodeHost, newNodePort, host, port):
+    def broadcastAddMember(self, newNodeIdx, newNodeHost, newNodePort, host, port):
         try:
             conn = rpyc.connect(host, port)
             conn.root.addMember(newNodeIdx, newNodeHost, newNodePort)
@@ -47,10 +50,10 @@ class Middleware(rpyc.Service):
             if nodeIdx == leaderIdx:
                 continue
             args = (oldNodeIdx, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
-            t = threading.Thread(target = self.notifyRemoveMember, args= args)
+            t = threading.Thread(target = self.broadcastRemoveMember, args= args)
             t.start()
 
-    def notifyRemoveMember(self, oldNodeIdx, host, port):
+    def broadcastRemoveMember(self, oldNodeIdx, host, port):
         try:
             conn = rpyc.connect(host, port)
             conn.root.removeMember(oldNodeIdx)
@@ -62,13 +65,46 @@ class Middleware(rpyc.Service):
         return (self.allNodesHost, self.allNodesPort)
 
     # set leader
-    def exposed_setLeader(self, leaderNodeHost, leaderNodePort):
+    def exposed_updateLeader(self, leaderNodeIdx, leaderNodeHost, leaderNodePort):
+        self.leaderIdx = leaderNodeIdx
         self.leaderHost = leaderNodeHost
         self.leaderPort = leaderNodePort
+        if self.checkLeaderTimer != None:
+            self.checkLeaderTimer.cancel()
+            self.checkLeaderTimer = None
 
     # get leader
     def exposed_getLeader(self):
         return self.leaderHost, self.leaderPort
+
+    # check leader:
+    def checkLeader(self):
+        print("check leader")
+        if self.leaderHost != "":
+            try:
+                conn = rpyc.connect(self.leaderHost, self.leaderPort)
+                if conn.root.is_leader() != True:
+                    self.leaderHost = ""
+                    self.leaderPort = 0
+                    self.leaderIdx = -1
+            except Exception:
+                print("Leader", self.leaderPort, "connection failed.")
+                del self.allNodesHost[self.leaderIdx]
+                del self.allNodesPort[self.leaderIdx]
+                for nodeIdx in self.allNodesHost:
+                    args = (self.leaderIdx, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
+                    t = threading.Thread(target = self.broadcastRemoveMember, args= args)
+                    t.start()
+                self.leaderHost = ""
+                self.leaderPort = 0
+                self.leaderIdx = -1
+                print(self.allNodesHost)
+                print(self.allNodesPort)
+
+        if self.checkLeaderTimer != None:
+            self.checkLeaderTimer.cancel()
+            self.checkLeaderTimer = None
+
 
 if __name__ == '__main__':
     from rpyc.utils.server import ThreadPoolServer
