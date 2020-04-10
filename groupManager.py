@@ -29,10 +29,10 @@ class Middleware(rpyc.Service):
             if nodeIdx == newNodeIdx:
                 continue
             args = (newNodeIdx, newNodeHost, newNodePort, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
-            t = threading.Thread(target = self.notifyNewMember, args= args)
+            t = threading.Thread(target = self.notifyAddMember, args= args)
             t.start()
 
-    def notifyNewMember(self, newNodeIdx, newNodeHost, newNodePort, host, port):
+    def notifyAddMember(self, newNodeIdx, newNodeHost, newNodePort, host, port):
         try:
             conn = rpyc.connect(host, port)
             conn.root.addMember(newNodeIdx, newNodeHost, newNodePort)
@@ -40,15 +40,35 @@ class Middleware(rpyc.Service):
             print("Node", newNodeIdx, "failed joining group")
 
     # remove node
-    def exposed_removeMember(self, oldNodeIdx):
-        self.allNodesHost.pop(oldNodeIdx)
-        self.allNodesPort.pop(oldNodeIdx)
+    def exposed_removeNode(self, leaderIdx, oldNodeIdx):
+        del self.allNodesHost[oldNodeIdx]
+        del self.allNodesPort[oldNodeIdx]
+        for nodeIdx in self.allNodesHost:
+            if nodeIdx == leaderIdx:
+                continue
+            args = (oldNodeIdx, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
+            t = threading.Thread(target = self.notifyRemoveMember, args= args)
+            t.start()
+
+    def notifyRemoveMember(self, oldNodeIdx, host, port):
+        try:
+            conn = rpyc.connect(host, port)
+            conn.root.removeMember(oldNodeIdx)
+        except Exception:
+            print("Node", oldNodeIdx, "delete at", port, "failed")
 
     # get node list
     def exposed_getNodeList(self):
         return (self.allNodesHost, self.allNodesPort)
+
     # set leader
-    # give out leader
+    def exposed_setLeader(self, leaderNodeHost, leaderNodePort):
+        self.leaderHost = leaderNodeHost
+        self.leaderPort = leaderNodePort
+
+    # get leader
+    def exposed_getLeader(self):
+        return self.leaderHost, self.leaderPort
 
 if __name__ == '__main__':
     from rpyc.utils.server import ThreadPoolServer

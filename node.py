@@ -164,22 +164,24 @@ class Node(rpyc.Service):
         for nodeIdx in self.allNodesHost:
             if nodeIdx == self.curNodeIdx:
                 continue
-            args = (self.currentTerm, self.curNodeIdx, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
+            args = (self.currentTerm, self.curNodeIdx, nodeIdx, self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
             t = threading.Thread(target = self.sendHeartBeat, args= args)
             t.start()
-        #todo group management: update nginx leader ip
+        self.updateGroupLeader()
 
-    def sendHeartBeat(self, currentTerm, leaderID, host, portNum):
+    def sendHeartBeat(self, currentTerm, leaderID, followerIdx, followerHost, followerPort):
         try:
-            conn = rpyc.connect(host, portNum)
+            conn = rpyc.connect(followerHost, followerPort)
             respSuccess, respTerm = conn.root.maitainFollowerState(currentTerm, leaderID)
-            print('Sent HeartBeat to', portNum)
+            print('Sent HeartBeat to', followerPort)
             if respSuccess == False:
                 self.currentState = 'follower'
                 self.currentTerm = respTerm
                 self.votedFor = None
         except Exception:
-            print("Node", portNum, "crashed at send heart beat")
+            print("Node", followerPort, "crashed at send heart beat")
+            # todo add retry count
+            self.leaderDetectFailedNode(followerIdx)
 
     def exposed_maitainFollowerState(self, term, leaderID):
         if term > self.currentTerm:
@@ -211,11 +213,11 @@ class Node(rpyc.Service):
         self.allNodesPort[newMemIdx] = newMemPort
         self.numNodes = len(self.allNodesHost)
 
-    '''
-    def exposed_removeMember(self, oldNodeHost, oldNodePort):
-        self.allNodesHost.remove(oldNodeHost)
-        self.allNodesPort.remove(oldNodePort)
-    '''
+
+    def exposed_removeMember(self, failNodeIdx):
+        del self.allNodesHost[failNodeIdx]
+        del self.allNodesPort[failNodeIdx]
+        self.numNodes = len(self.allNodesHost)
 
     def joinGroup(self):
         try:
@@ -227,12 +229,29 @@ class Node(rpyc.Service):
         self.allNodesPort[self.curNodeIdx] = self.curNodePort
         self.numNodes = len(self.allNodesHost)
 
+    def leaderDetectFailedNode(self, failNodeIdx):
+        try:
+            conn = rpyc.connect(self.middlewareHost, self.middlewarePort)
+            conn.root.removeNode(self.curNodeIdx, failNodeIdx)
+        except Exception:
+            print("Node", failNodeIdx, "delete failed")
+        del self.allNodesHost[failNodeIdx]
+        del self.allNodesPort[failNodeIdx]
+        self.numNodes = len(self.allNodesHost)
+
     def getAllMembers(self):
         try:
             conn = rpyc.connect(self.middlewareHost, self.middlewarePort)
             return conn.root.getNodeList()
         except Exception:
-            print("Middleware", portNum, "failed returning all members")
+            print("Middleware", self.middlewarePort, "failed returning all members")
+
+    def updateGroupLeader(self):
+        try:
+            conn = rpyc.connect(self.middlewareHost, self.middlewarePort)
+            return conn.root.setLeader(self.curNodeHost, self.curNodePort)
+        except Exception:
+            print("Middleware", self.middlewarePort, "failed setting leader")
 
     def exposed_is_leader(self):
         return self.currentState == 'leader'
