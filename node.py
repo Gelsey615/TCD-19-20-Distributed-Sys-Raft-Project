@@ -259,6 +259,28 @@ class Node(rpyc.Service):
             result += f'RoomId = {row[0]}, Type = {row[1]}, Floor = {row[2]}\n'
         self.conn.close()
         return result
+
+    # client call this function on Leader node, leader call this function on follower nodes
+    # this is the first step of two-phase commit.
+    # When all follower nodes return successfully, commitAsLeader is called
+    def exposed_bookRoom(self, insertStr):
+        return True
+
+    def exposed_commit(self):
+        self.conn.commit()
+
+    # Leader tells followers to commit
+    def commitAsLeader(self):
+        for nodeIdx in self.allNodesHost:
+            if nodeIdx == self.curNodeIdx:
+                continue
+            try:
+                conn = rpyc.connect(self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
+                conn.root.commit()
+            except Exception:
+                print("Node", portNum, "commit failed")
+        self.commit()
+
     '''
         1.5 ends
     '''
