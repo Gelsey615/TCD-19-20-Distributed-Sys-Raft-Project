@@ -22,15 +22,6 @@ class Node(rpyc.Service):
 
         self.joinGroup()
 
-        # sqlite connection
-        self.conn = None
-        try:
-            self.conn = sqlite3.connect("pythonsqlite.db")
-            print(sqlite3.version)
-        except Error as e:
-            print(e)
-        if self.conn == None:
-            print("connection to db failed")
 
         # initial status setup
         self.currentState = "follower"
@@ -253,6 +244,24 @@ class Node(rpyc.Service):
 
     def exposed_is_leader(self):
         return self.currentState == 'leader'
+    '''
+        1.4 ends
+    '''
+
+    '''
+        1.5 Code related to db operation
+    '''
+    def exposed_query(self, queryStr):
+        self.conn = sqlite3.connect("pythonsqlite.db")
+        cursor = self.conn.execute(queryStr)
+        result = ""
+        for row in cursor:
+            result += f'RoomId = {row[0]}, Type = {row[1]}, Floor = {row[2]}\n'
+        self.conn.close()
+        return result
+    '''
+        1.5 ends
+    '''
 
 if __name__ == '__main__':
     from rpyc.utils.server import ThreadPoolServer
