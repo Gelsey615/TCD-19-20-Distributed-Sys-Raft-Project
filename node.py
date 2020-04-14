@@ -34,6 +34,13 @@ class Node(rpyc.Service):
         self.electionTimer = None
         self.votesCheckTimer = None
 
+        # create db file
+        self.dbFile = "pythonsqlite" + argNodeIdx +"db"
+        if not os.path.exists(self.dbFile):
+            file = open(self.dbFile, 'w')
+            file.close()
+            #todo add reviving process from log
+
         mainThread = threading.Thread(target = self.run_server)
         mainThread.start()
 
@@ -252,7 +259,7 @@ class Node(rpyc.Service):
         1.5 Code related to db operation
     '''
     def exposed_query(self, queryStr):
-        self.conn = sqlite3.connect("pythonsqlite.db")
+        self.conn = sqlite3.connect(self.dbFile)
         cursor = self.conn.execute(queryStr)
         result = ""
         for row in cursor:
@@ -260,26 +267,74 @@ class Node(rpyc.Service):
         self.conn.close()
         return result
 
-    # client call this function on Leader node, leader call this function on follower nodes
+    # client calls this function on Leader node, leader call this function on follower nodes
     # this is the first step of two-phase commit.
     # When all follower nodes return successfully, commitAsLeader is called
     def exposed_bookRoom(self, insertStr):
-        return True
+        self.dbInsert=insertStr
 
-    def exposed_commit(self):
+        if self.currentState == 'leader':
+            commit = True
+            for nodeIdx in self.allNodesHost:
+                if nodeIdx == self.curNodeIdx:
+                    continue
+                try:
+                    conn = rpyc.connect(self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
+                    conn.root.bookRoom(insertStr)
+                except Exception:
+                    print("Node", self.allNodesPort[nodeIdx], "insert failed")
+                    commit = False
+                    break
+            if commit:
+                return self.commitAsLeader()
+
+    # leader calls this function to notify follower to commit
+    def exposed_commitAsFollower(self):
+        self.conn = sqlite3.connect(self.dbFile)
+        self.conn.execute(self.dbInsert)
         self.conn.commit()
+        self.conn.close()
+
+    # leader calls this function to notify follower to rollback the last transaction
+    def exposed_rollbackAsFollower(self):
+        self.conn = sqlite3.connect(self.dbFile)
+        self.conn.rollback()
+        self.conn.close()
+
+    # Leader tells followers to rollback
+    def rollbackAsLeader(self, NodesToRollback):
+        self.conn = sqlite3.connect(self.dbFile)
+        self.conn.rollback()
+        self.conn.close()
+        for nodeIdx in NodesToRollback:
+            try:
+                conn = rpyc.connect(self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
+                conn.root.rollbackAsFollower()
+            except Exception:
+                print("Node", self.allNodesPort[nodeIdx], "rollback failed")
 
     # Leader tells followers to commit
     def commitAsLeader(self):
+        self.conn = sqlite3.connect(self.dbFile)
+        self.conn.execute(self.dbInsert)
+        self.conn.commit()
+        self.conn.close()
+        allCommit = True
+        committedNodes = []
         for nodeIdx in self.allNodesHost:
             if nodeIdx == self.curNodeIdx:
                 continue
             try:
                 conn = rpyc.connect(self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
-                conn.root.commit()
+                conn.root.commitAsFollower()
             except Exception:
-                print("Node", portNum, "commit failed")
-        self.commit()
+                print("Node", self.allNodesPort[nodeIdx], "commit failed")
+                allCommit = False
+                break
+            committedNodes.append(nodeIdx)
+        if allCommit == False:
+            self.rollbackAsLeader(committedNodes)
+        return allCommit
 
     '''
         1.5 ends
