@@ -22,7 +22,6 @@ class Node(rpyc.Service):
 
         self.joinGroup()
 
-
         # initial status setup
         self.currentState = "follower"
         self.currentTerm = 0
@@ -35,7 +34,7 @@ class Node(rpyc.Service):
         self.votesCheckTimer = None
 
         # create db file
-        self.dbFile = "pythonsqlite" + argNodeIdx +"db"
+        self.dbFile = f'pythonsqlite{self.curNodeIdx}.db'
         if not os.path.exists(self.dbFile):
             file = open(self.dbFile, 'w')
             file.close()
