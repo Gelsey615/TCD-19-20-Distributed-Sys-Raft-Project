@@ -48,7 +48,7 @@ class Client(rpyc.Service):
             conn = rpyc.connect(host, port)
             result = conn.root.query(queryStr)
             if result == "":
-                print ("No such room")
+                print ("No such room\n")
             else:
                 print (result)
         except Exception:
@@ -59,7 +59,7 @@ class Client(rpyc.Service):
         try:
             conn = rpyc.connect(host, port)
             result = conn.root.bookRoom(insertStr)
-            print("Add room successfully: ", result)
+            print("Add room successfully: ", result, "\n")
         except Exception:
             print("connection to server failed, requesting new IP address")
             self.requestLeader()
@@ -71,7 +71,7 @@ class Client(rpyc.Service):
         if self.leaderHost == "":
             print("no server connection")
             return
-        print("connecting", self.leaderHost, self.leaderPort)
+        #print("connecting", self.leaderHost, self.leaderPort)
         queryStr = 'SELECT RoomID, Type, Floor from RoomInfo where Type = 4'
         args = (self.leaderHost, self.leaderPort, queryStr)
         t = threading.Thread(target = self.connectAndQuery, args= args)
@@ -84,7 +84,7 @@ class Client(rpyc.Service):
         if self.leaderHost == "":
             print("no server connection")
             return
-        print("connecting", self.leaderHost, self.leaderPort)
+        #print("connecting", self.leaderHost, self.leaderPort)
         inserStr = f'INSERT INTO RoomInfo (RoomID,Type,Floor) VALUES ({self.roomStartId+1}, 4, 3)'
         self.roomStartId += 1
         args = (self.leaderHost, self.leaderPort, inserStr)

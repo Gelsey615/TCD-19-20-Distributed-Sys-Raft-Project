@@ -21,6 +21,7 @@ class Node(rpyc.Service):
         self.numNodes = len(self.allNodesHost)
 
         self.joinGroup()
+        self.leaderDbCopied = False
 
         # initial status setup
         self.currentState = "follower"
@@ -186,12 +187,18 @@ class Node(rpyc.Service):
             self.currentState = 'follower'
             self.currentLeader = leaderID
             self.votedFor = None
+            if self.leaderDbCopied == False:
+                self.copyDbFromLeader()
+                self.leaderDbCopied = True
             return (True, self.currentTerm)
         elif term == self.currentTerm:
             self.followerTimer.cancel()
             self.followerTimer = None
             self.currentState = 'follower'
             self.currentLeader = leaderID
+            if self.leaderDbCopied == False:
+                self.copyDbFromLeader()
+                self.leaderDbCopied = True
             return (True, self.currentTerm)
         else:
             return (False, self.currentTerm)
@@ -257,6 +264,34 @@ class Node(rpyc.Service):
     '''
         1.5 Code related to db operation
     '''
+    def copyDbFromLeader(self):
+        tableRoom = '''CREATE TABLE RoomInfo
+                 (RoomID INT PRIMARY KEY     NOT NULL,
+                 Type           INT    NOT NULL,
+                 Floor          INT     NOT NULL);'''
+        TableBookInfo = '''CREATE TABLE BookInfo
+                 (TranID TEXT PRIMARY KEY     NOT NULL,
+                 Name           TEXT    NOT NULL,
+                 Phone          TEXT    NOT NULL,
+                 Email          TEXT    NOT NULL,
+                 RoomID         INT     NOT NULL,
+                 StartT         INT64   NOT NULL,
+                 EndT           INT64   NOT NULL,
+                 FOREIGN KEY(RoomID) REFERENCES RoomInfo(RoomID));'''
+        self.conn = sqlite3.connect(self.dbFile)
+        self.conn.execute('drop table if exists RoomInfo')
+        self.conn.execute('drop table if exists BookInfo')
+        self.conn.execute(tableRoom)
+        self.conn.execute(TableBookInfo)
+        self.leaderDbConn = sqlite3.connect(f'pythonsqlite{self.currentLeader}.db')
+        cursor = self.leaderDbConn.execute('SELECT * from RoomInfo')
+        for row in cursor:
+            self.conn.execute(f'INSERT INTO RoomInfo (RoomID,Type,Floor) \
+              VALUES ({row[0]}, {row[1]}, {row[2]})')
+        self.leaderDbConn.close()
+        self.conn.commit()
+        self.conn.close()
+
     def exposed_query(self, queryStr):
         self.conn = sqlite3.connect(self.dbFile)
         cursor = self.conn.execute(queryStr)
@@ -279,20 +314,29 @@ class Node(rpyc.Service):
                     continue
                 try:
                     conn = rpyc.connect(self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
-                    conn.root.bookRoom(insertStr)
+                    result = conn.root.bookRoom(insertStr)
+                    if result == False:
+                        print("Node", self.allNodesPort[nodeIdx], "commit failed")
+                        commit = False
+                        break
                 except Exception:
-                    print("Node", self.allNodesPort[nodeIdx], "insert failed")
+                    print("Node", self.allNodesPort[nodeIdx], "commit failed")
                     commit = False
                     break
             if commit:
                 return self.commitAsLeader()
+            else:
+                return False
+        return True
 
     # leader calls this function to notify follower to commit
     def exposed_commitAsFollower(self):
         self.conn = sqlite3.connect(self.dbFile)
+        #todo check if execute can happen.
         self.conn.execute(self.dbInsert)
         self.conn.commit()
         self.conn.close()
+        return True
 
     # leader calls this function to notify follower to rollback the last transaction
     def exposed_rollbackAsFollower(self):
@@ -325,7 +369,11 @@ class Node(rpyc.Service):
                 continue
             try:
                 conn = rpyc.connect(self.allNodesHost[nodeIdx], self.allNodesPort[nodeIdx])
-                conn.root.commitAsFollower()
+                result = conn.root.commitAsFollower()
+                if result == False:
+                    print("Node", self.allNodesPort[nodeIdx], "commit failed")
+                    allCommit = False
+                    break
             except Exception:
                 print("Node", self.allNodesPort[nodeIdx], "commit failed")
                 allCommit = False
